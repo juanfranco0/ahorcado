@@ -1,0 +1,233 @@
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/pgmspace.h>
+#include <stdlib.h>
+#include "st7735.c"
+#include <time.h>
+#define BAUD 9600
+#define MYUBRR F_CPU/16/BAUD-1
+#define MAX_WORD_LENGTH 20
+#define MAX_WORDS 5
+char palabras[MAX_WORDS][MAX_WORD_LENGTH];
+#define MAX_LIVES 5
+int vidas_restantes;
+const char palabras_iniciales[MAX_WORDS][MAX_WORD_LENGTH] PROGMEM = {
+	"perro",
+	"universidad",
+	"embebidos",
+	"parcial",
+	"libro"
+};
+
+void copiar_palabras_desde_flash() {
+	for (int i = 0; i < MAX_WORDS; i++) {
+		strcpy(palabras[i], (PGM_P)palabras_iniciales[i]);
+	}
+}
+void inicializar_rand_con_timer() {
+	// Habilitar el Timer1
+	TCCR1B |= (1 << CS10); // No prescaler
+	srand(TCNT1); // Usar el valor del timer como semilla
+	}
+	
+char* seleccionar_palabra_aleatoria() {
+	// Generar una semilla para la función rand() basada en el tiempo actual
+	 inicializar_rand_con_timer();
+	
+	// Generar un índice aleatorio entre 0 y MAX_WORDS - 1
+	int indice_aleatorio = rand() % MAX_WORDS;
+	
+	// Devolver la dirección de memoria de la palabra en el arreglo en RAM
+	return palabras[indice_aleatorio];
+}
+void USART_Init(unsigned int ubrr) {
+	UBRR0H = (unsigned char)(ubrr >> 8);
+	UBRR0L = (unsigned char)ubrr;
+	UCSR0B = (1 << RXEN0) | (1 << TXEN0);
+	UCSR0C = (1 << USBS0) | (3 << UCSZ00);
+}
+
+void USART_Transmit(unsigned char data) {
+	while (!(UCSR0A & (1 << UDRE0)));
+	UDR0 = data;
+}
+
+unsigned char USART_Receive(void) {
+	while (!(UCSR0A & (1 << RXC0)));
+	return UDR0;
+}
+
+void USART_SendString(const char *str) {
+	while (*str) {
+		USART_Transmit(*str++);
+	}
+}
+
+void mostrar_menu() {
+	USART_SendString("1. Presione 1 Para iniciar juego\r\n");
+	_delay_ms(10);
+	USART_SendString("2. Presione 2 Para Almacenar una Nueva palabra\r\n");
+	_delay_ms(10);
+	USART_SendString("3. Presione 3 Para Activar el Modo oculto\r\n");
+	_delay_ms(10);
+	USART_SendString("4. Presione 4 Para Desactivar modo oculto\r\n");
+	_delay_ms(10);
+	USART_SendString("5. Presione 5 para mostrar los integrantes del equipo\r\n");
+	_delay_ms(10);
+	USART_SendString("Elija una opcion:\r\n");
+	_delay_ms(10);
+}
+
+void iniciar_juego() {
+	USART_SendString("Iniciando el juego...\r\n");
+	// Copiar palabras desde la memoria flash a RAM
+	copiar_palabras_desde_flash();
+	
+	// Seleccionar una palabra aleatoria
+	char *palabra_secreta = seleccionar_palabra_aleatoria();
+	
+	
+	DrawString(palabra_secreta,black,X2);
+	
+	
+	
+}
+
+void mostrar_palabras_en_LCD() {
+	init_st7735();
+	ClearScreen(0);
+	SetPosition(0, 0);
+	DrawString("Palabras guardadas:", white, X1);
+
+	for (int i = 0; i < MAX_WORDS; i++) {
+		SetPosition(0, 20 + (i * 20));  // Ajuste de posición para cada palabra
+		DrawString(palabras_iniciales[i], white, X1);
+		_delay_ms(1000);
+	}
+}
+
+void modo_oculto() {
+	mostrar_palabras_en_LCD();
+	USART_SendString("Modo oculto activado...\r\n");
+	for (int i = 0; i < MAX_WORDS; i++) {
+		SetPosition(0, 20 + (i * 20));  // Ajuste de posición para cada palabra
+		USART_SendString(palabras_iniciales[i]);
+		USART_SendString("\r\n");
+		_delay_ms(1000);
+	}
+}
+
+
+void desactivar_modo_oculto() {
+	init_st7735();
+	ClearScreen(0);
+	USART_SendString("Modo oculto desactivado...\r\n");
+}
+
+void integrantes_del_equipo() {
+	USART_SendString("Integrantes del equipo:\r\n");
+	USART_SendString("\r\n");
+	USART_SendString("1. Kevin Lopez\r\n");
+	USART_SendString("2. Juan David Franco\r\n");
+	_delay_ms(400);
+}
+
+void almacenar_palabra(int num_palabra, char *palabra) {
+	if (num_palabra >= 1 && num_palabra <= MAX_WORDS) {
+		strcpy(palabras[num_palabra - 1], palabra);
+		} else {
+		USART_SendString("Numero de palabra fuera de rango.\r\n");
+	}
+}
+
+void recuperar_palabra(int num_palabra) {
+	if (num_palabra >= 1 && num_palabra <= MAX_WORDS) {
+		USART_SendString("Palabra ");
+		USART_Transmit(num_palabra + '0');
+		USART_SendString(": ");
+		USART_SendString(palabras[num_palabra - 1]);
+		USART_SendString("\r\n");
+		} else {
+		USART_SendString("Numero de palabra fuera de rango.\r\n");
+	}
+}
+
+void nueva_palabra() {
+	init_st7735();
+	ClearScreen(0);
+	DrawString("Modo guardar palabra...",white,X1);
+	char buffer[MAX_WORD_LENGTH];
+	USART_SendString("Ingrese el numero de palabra (1-5):\r\n");
+	int num_palabra = USART_Receive() - '0';
+	USART_Transmit(num_palabra + '0');
+	USART_SendString("\r\n");
+
+	if (num_palabra < 1 || num_palabra > MAX_WORDS) {
+		USART_SendString("Numero de palabra no valido.\r\n");
+		return;
+	}
+
+	recuperar_palabra(num_palabra);
+	USART_SendString("Palabra actual: ");
+	USART_SendString(palabras[num_palabra - 1]);
+	USART_SendString("\r\n");
+
+	USART_SendString("¿Desea reemplazarla? (S/N)\r\n");
+	char respuesta = USART_Receive();
+	USART_Transmit(respuesta);
+	USART_SendString("\r\n");
+
+	if (respuesta == 'S' || respuesta == 's') {
+		USART_SendString("Ingrese la nueva palabra:\r\n");
+		char c;
+		int i = 0;
+
+		while ((c = USART_Receive()) != '\r' && i < MAX_WORD_LENGTH - 1) {
+			USART_Transmit(c);
+			buffer[i++] = c;
+		}
+		buffer[i] = '\0';
+		USART_SendString("\r\n");
+
+		almacenar_palabra(num_palabra, buffer);
+		USART_SendString("Palabra actualizada.\r\n");
+		} else {
+		USART_SendString("Operación cancelada.\r\n");
+	}
+}
+
+int main(void) {
+	USART_Init(MYUBRR);
+	unsigned char opcion;
+
+	while (1) {
+		mostrar_menu();
+		opcion = USART_Receive();
+
+		switch (opcion) {
+			case '1':
+			iniciar_juego();
+			break;
+			case '2':
+			nueva_palabra();
+			break;
+			case '3':
+			modo_oculto();
+			break;
+			case '4':
+			desactivar_modo_oculto();
+			break;
+			case '5':
+			integrantes_del_equipo();
+			break;
+			default:
+			USART_SendString("Opcion no valida. Intente de nuevo.\r\n");
+			break;
+		}
+
+		_delay_ms(1000);
+	}
+
+	return 0;
+}
